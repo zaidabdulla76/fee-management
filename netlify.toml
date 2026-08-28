@@ -1,0 +1,36 @@
+# Netlify hosts the Vite + React SPA (frontend/).
+# API, Postgres, and the nightly sweep run on Render (see render.yaml).
+
+[build]
+  base = "frontend"
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# Same-origin /api — matches Vite's local proxy and infra/nginx/nginx.conf.
+# Update the host if Render assigned a suffix (Dashboard → hijri-fee-api → URL).
+[[redirects]]
+  from = "/api/*"
+  to = "https://hijri-fee-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+
+# React Router: /login, /students/:id, /collect, /reports, /setup
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

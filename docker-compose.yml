@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: fee
+      POSTGRES_PASSWORD: fee
+      POSTGRES_DB: fee
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fee -d fee"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    # Host port 5433 avoids clashing with a local Windows PostgreSQL on 5432.
+    ports:
+      - "5433:5432"
+
+  api:
+    build: ./backend
+    environment:
+      DATABASE_URL_ADMIN: postgresql+psycopg://fee:fee@postgres:5432/fee
+      DATABASE_URL: postgresql+psycopg://fee_app:fee_app@postgres:5432/fee
+      JWT_SECRET: fee-mgmt-dev-secret-change-me
+      INTERNAL_SWEEP_TOKEN: fee-internal-sweep-token
+      FEE_APP_PASSWORD: fee_app
+      CORS_ORIGINS: "*"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Internal only — reached via Nginx /api/*
+
+  scheduler:
+    build: ./infra/scheduler
+    environment:
+      API_URL: http://api:8000
+      INTERNAL_SWEEP_TOKEN: fee-internal-sweep-token
+    depends_on:
+      - api
+
+  web:
+    build: ./frontend
+    # Static SPA only — internal network
+    depends_on:
+      - api
+
+  nginx:
+    build: ./infra/nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web
+      - api
+
+volumes:
+  pgdata:

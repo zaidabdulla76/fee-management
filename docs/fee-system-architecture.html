@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="light dark">
+<title>Hijri Fee Ledger</title>
+<meta name="description" content="System design and architecture for the Hijri-calendar student fee management system.">
+<style>
+  :root {
+    --bg: #eff1ec;
+    --surface: #ffffff;
+    --surface-alt: #e5e9e0;
+    --ink: #1b211d;
+    --ink-muted: #57625b;
+    --border: #d3d9cd;
+    --accent: #0f5c52;
+    --accent-strong: #0a453e;
+    --accent-soft: #dceae6;
+    --gold: #a9782e;
+    --code-bg: #e7e9e1;
+    --good: #2e7d4f;
+    --warn: #b07a1e;
+    --bad: #b4402b;
+    --shadow: 0 1px 2px rgba(20, 30, 25, 0.06), 0 6px 20px rgba(20, 30, 25, 0.05);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #121613;
+      --surface: #171d19;
+      --surface-alt: #1d2420;
+      --ink: #e7ece5;
+      --ink-muted: #98a598;
+      --border: #2b332c;
+      --accent: #59c3ae;
+      --accent-strong: #8adcc9;
+      --accent-soft: #1b3733;
+      --gold: #d2a854;
+      --code-bg: #1c231e;
+      --good: #63c187;
+      --warn: #e0ab43;
+      --bad: #e2685a;
+      --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 6px 20px rgba(0, 0, 0, 0.35);
+    }
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    background: var(--bg);
+  }
+
+  body {
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    font-size: 16px;
+    line-height: 1.65;
+    margin: 0;
+    padding: 0 1.25rem 6rem;
+  }
+
+  a { color: var(--accent-strong); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  a:focus-visible, button:focus-visible, summary:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  h1, h2, h3, h4 {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-weight: 600;
+    text-wrap: balance;
+    color: var(--ink);
+    margin: 0;
+  }
+
+  .page { max-width: 1180px; margin: 0 auto; }
+
+  header.hero {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 3.5rem 0 2.25rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .eyebrow {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--gold);
+    display: flex;
+    gap: 0.6rem;
+    align-items: center;
+    margin-bottom: 0.9rem;
+  }
+  .eyebrow .rule { flex: 0 0 28px; height: 1px; background: var(--gold); opacity: 0.6; }
+  h1.title { font-size: clamp(2.1rem, 4vw, 2.9rem); letter-spacing: -0.01em; }
+  .subtitle {
+    font-family: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, serif;
+    font-style: italic;
+    color: var(--ink-muted);
+    font-size: 1.15rem;
+    margin-top: 0.5rem;
+  }
+  .meta-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.6rem;
+    margin-top: 1.6rem;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.82rem;
+    color: var(--ink-muted);
+  }
+  .meta-row strong { color: var(--ink); font-weight: 600; }
+
+  .layout {
+    display: grid;
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 3rem;
+    padding-top: 2.75rem;
+  }
+  @media (max-width: 860px) {
+    .layout { grid-template-columns: 1fr; }
+    nav.toc { position: static; order: -1; margin-bottom: 1rem; }
+  }
+
+  nav.toc {
+    position: sticky;
+    top: 1.5rem;
+    align-self: start;
+    font-size: 0.86rem;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.55rem; }
+  nav.toc a {
+    color: var(--ink-muted);
+    text-decoration: none;
+    display: flex;
+    gap: 0.6rem;
+    padding: 0.15rem 0;
+    border-left: 2px solid transparent;
+    padding-left: 0.7rem;
+  }
+  nav.toc a:hover, nav.toc a:focus-visible { color: var(--accent-strong); border-left-color: var(--accent); }
+  nav.toc .n {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    color: var(--gold);
+    min-width: 1.4em;
+  }
+
+  main { min-width: 0; }
+
+  section.block { padding: 2.6rem 0; border-bottom: 1px solid var(--border); }
+  section.block:last-child { border-bottom: none; }
+
+  .section-head { display: flex; align-items: baseline; gap: 0.9rem; margin-bottom: 1.3rem; }
+  .section-head .num {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 1rem;
+    color: var(--gold);
+    border: 1px solid var(--border);
+    padding: 0.15rem 0.5rem;
+    line-height: 1.4;
+  }
+  h2.section-title { font-size: 1.55rem; }
+  h3.sub-title { font-size: 1.15rem; margin: 1.8rem 0 0.8rem; color: var(--accent-strong); }
+
+  .prose { max-width: 700px; }
+  .prose p { margin: 0 0 1rem; color: var(--ink); }
+  .prose ul, .prose ol { max-width: 700px; padding-left: 1.3rem; margin: 0 0 1rem; }
+  .prose li { margin-bottom: 0.4rem; }
+  .prose strong { color: var(--ink); }
+
+  .wide { max-width: 960px; }
+
+  figure { margin: 1.6rem 0 2rem; }
+  figure.wide { max-width: 960px; }
+  .diagram-frame {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    padding: 1.4rem;
+    overflow-x: auto;
+  }
+  .diagram-frame svg { width: 100%; height: auto; display: block; color: var(--ink); }
+  figcaption {
+    font-size: 0.86rem;
+    color: var(--ink-muted);
+    margin-top: 0.7rem;
+    max-width: 700px;
+  }
+
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    font-size: 0.88rem;
+  }
+  .table-scroll { overflow-x: auto; border: 1px solid var(--border); background: var(--surface); }
+  th, td {
+    text-align: left;
+    padding: 0.6rem 0.9rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  thead th {
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-muted);
+    background: var(--surface-alt);
+  }
+  tbody tr:last-child td { border-bottom: none; }
+  code, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+  td .mono, th .mono { color: var(--accent-strong); }
+  .num-col { font-variant-numeric: tabular-nums; }
+
+  .pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    font-size: 0.72rem;
+    padding: 0.12rem 0.55rem;
+    border: 1px solid currentColor;
+  }
+  .pill.tuition { color: var(--accent-strong); }
+  .pill.collection { color: var(--gold); }
+  .pill.get { color: var(--good); }
+  .pill.post { color: var(--warn); }
+
+  .callout {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.2rem;
+    max-width: 700px;
+    margin: 1.2rem 0;
+    font-size: 0.94rem;
+  }
+  .callout strong { color: var(--accent-strong); }
+
+  .two-col {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.2rem;
+    max-width: 960px;
+  }
+  @media (max-width: 640px) { .two-col { grid-template-columns: 1fr; } }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    padding: 1.1rem 1.2rem;
+  }
+  .card h4 { font-size: 0.95rem; margin-bottom: 0.5rem; }
+  .card p { margin: 0; font-size: 0.88rem; color: var(--ink-muted); }
+
+  footer.doc-footer {
+    max-width: 700px;
+    margin-top: 2rem;
+    color: var(--ink-muted);
+    font-size: 0.85rem;
+  }
+</style>
+</head>
+<body>
+<div class="page">
+  <header class="hero">
+    <div class="eyebrow"><span class="rule"></span> System Design &amp; Architecture</div>
+    <h1 class="title">Hijri Fee Ledger</h1>
+    <p class="subtitle">How the Hijri-calendar student fee system is built, wired, and run.</p>
+    <div class="meta-row">
+      <span><strong>Companion to</strong> fee-management-system-requirements-v3.md</span>
+      <span><strong>Version</strong> 1.0</span>
+      <span><strong>Date</strong> 14 Aug 2026</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Sections">
+      <ol>
+        <li><a href="#overview"><span class="n">1</span>Overview</a></li>
+        <li><a href="#components"><span class="n">2</span>Components</a></li>
+        <li><a href="#bill-paths"><span class="n">3</span>Two Bill Paths</a></li>
+        <li><a href="#data-model"><span class="n">4</span>Data Model</a></li>
+        <li><a href="#flows"><span class="n">5</span>Key Flows</a></li>
+        <li><a href="#api"><span class="n">6</span>API Surface</a></li>
+        <li><a href="#deployment"><span class="n">7</span>Deployment</a></li>
+        <li><a href="#nfr"><span class="n">8</span>NFR Mapping</a></li>
+        <li><a href="#open"><span class="n">9</span>Open Questions</a></li>
+      </ol>
+    </nav>
+
+    <main>
+
+      <section class="block" id="overview">
+        <div class="section-head"><span class="num">01</span><h2 class="section-title">Overview</h2></div>
+        <div class="prose">
+          <p>The system tracks Hijri-calendar student billing across two fundamentally different fee lifecycles that share one schema. <strong>Tuition</strong> is enrollment-driven: a student is enrolled once per academic year and the system generates 12 monthly bills up front, each of which can sit Pending, go Overdue, and accrue a late fee before it's paid. <strong>Books, Exam, Uniform, and Bag</strong> are collection-driven: nothing is generated in advance — Admin picks the fee type and a priced variant at the moment a student pays, and the bill is born already Paid.</p>
+          <p>Everything below is organized around that split, because it's the one design decision the rest of the architecture has to accommodate: one <code>MonthlyBill</code> table, two ways a row in it comes to exist.</p>
+        </div>
+      </section>
+
+      <section class="block" id="components">
+        <div class="section-head"><span class="num">02</span><h2 class="section-title">Component Architecture</h2></div>
+        <figure class="wide">
+          <div class="diagram-frame">
+            <svg viewBox="0 0 860 372" role="img" aria-label="Admin's browser SPA calls the FastAPI backend over HTTPS, which reads and writes PostgreSQL over SQL. A nightly scheduler container calls the API to sweep overdue Tuition bills. The API also renders PDF and Excel exports on demand, which the browser downloads.">
+              <defs>
+                <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+
+              <rect x="40" y="130" width="180" height="76" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+              <text x="130" y="160" text-anchor="middle" font-size="13" font-weight="600">Admin Browser</text>
+              <text x="130" y="180" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.75">React + TypeScript SPA</text>
+
+              <rect x="340" y="130" width="180" height="76" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+              <text x="430" y="160" text-anchor="middle" font-size="13" font-weight="600">API</text>
+              <text x="430" y="180" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.75">FastAPI + SQLAlchemy</text>
+
+              <rect x="640" y="130" width="180" height="76" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+              <text x="730" y="160" text-anchor="middle" font-size="13" font-weight="600">PostgreSQL</text>
+              <text x="730" y="180" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.75">Bills · payments · settings</text>
+
+              <line x1="220" y1="168" x2="336" y2="168" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"></line>
+              <text x="278" y="150" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.75">HTTPS · REST/JSON</text>
+
+              <line x1="520" y1="168" x2="636" y2="168" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"></line>
+              <text x="578" y="150" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.75">SQL</text>
+
+              <rect x="340" y="270" width="180" height="70" fill="none" stroke="var(--accent)" stroke-width="1.4"></rect>
+              <text x="430" y="298" text-anchor="middle" font-size="13" font-weight="600" fill="var(--accent-strong)">Scheduler</text>
+              <text x="430" y="317" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.75">nightly cron</text>
+
+              <line x1="430" y1="268" x2="430" y2="208" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow)"></line>
+              <text x="446" y="240" font-size="10.5" fill="var(--accent-strong)">sweep overdue Tuition</text>
+              <text x="446" y="253" font-size="10.5" fill="var(--accent-strong)">bills · apply late fee (FR-10)</text>
+
+              <rect x="640" y="270" width="180" height="70" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+              <text x="730" y="298" text-anchor="middle" font-size="13" font-weight="600">PDF / Excel</text>
+              <text x="730" y="317" text-anchor="middle" font-size="11.5" fill="currentColor" opacity="0.75">export renderer</text>
+
+              <line x1="730" y1="208" x2="730" y2="268" stroke="currentColor" stroke-width="1.4" marker-end="url(#arrow)"></line>
+              <text x="746" y="242" font-size="10.5" fill="currentColor" opacity="0.75">render report</text>
+
+              <text x="730" y="358" text-anchor="middle" font-size="10.5" fill="currentColor" opacity="0.6">→ file streamed back through the API, downloaded in the browser</text>
+            </svg>
+          </div>
+          <figcaption>The SPA never talks to Postgres directly — every read and write, including report generation, goes through the API. The scheduler is the only other writer, and it only ever touches Tuition bills.</figcaption>
+        </figure>
+
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Component</th><th>Technology</th><th>Responsibility</th></tr></thead>
+            <tbody>
+              <tr><td>Web App</td><td class="mono">React + TypeScript + Tailwind</td><td>Student/billing UI, the FR-12 collection flow, Settings screens, report views.</td></tr>
+              <tr><td>API</td><td class="mono">FastAPI + SQLAlchemy</td><td>All business rules: bill generation, payment recording, late-fee math, exports. Single source of truth for both bill-creation paths.</td></tr>
+              <tr><td>Database</td><td class="mono">PostgreSQL</td><td>Append-only <code>Payment</code> table, versioned bills, settings tables. See Section 4.</td></tr>
+              <tr><td>Scheduler</td><td class="mono">cron / APScheduler</td><td>One nightly job: flag overdue Tuition bills and stamp their late fee. Nothing else runs here — non-Tuition fees have no overdue state to sweep.</td></tr>
+              <tr><td>Export renderer</td><td class="mono">WeasyPrint (PDF) + openpyxl (Excel)</td><td>Turns the same report queries the dashboard uses into downloadable files (FR-8.6).</td></tr>
+              <tr><td>Auth</td><td class="mono">JWT, single admin role</td><td>Stateless bearer tokens; every mutating endpoint requires a valid token (NFR-3).</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block" id="bill-paths">
+        <div class="section-head"><span class="num">03</span><h2 class="section-title">The Two Bill-Creation Paths</h2></div>
+        <div class="prose">
+          <p>This is the architectural fork everything else hangs off. <code>FeeType.mode</code> is either <strong>Enrollment</strong> (Tuition, and only Tuition) or <strong>Collection</strong> (Books, Exam, Uniform, Bag). The two modes don't just price differently — they create rows in <code>MonthlyBill</code> at different times, for different reasons, and one of them can go overdue while the other structurally cannot.</p>
+        </div>
+
+        <figure class="wide">
+          <div class="diagram-frame">
+            <svg viewBox="0 0 860 480" role="img" aria-label="Comparison: Tuition bills are generated at enrollment, sit Pending, and can go Overdue with a late fee before being paid. Non-Tuition bills are created only at the point of payment collection and are Paid immediately — there is no Pending or Overdue state, so no late fee ever applies.">
+              <defs>
+                <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+
+              <text x="200" y="30" text-anchor="middle" font-size="13" font-weight="600" fill="var(--accent-strong)">TUITION — Enrollment mode</text>
+              <text x="640" y="30" text-anchor="middle" font-size="13" font-weight="600" fill="var(--gold)">BOOKS · EXAM · UNIFORM · BAG — Collection mode</text>
+
+              <rect x="80" y="52" width="240" height="52" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="200" y="83" text-anchor="middle" font-size="12">Student enrolled in academic year</text>
+              <line x1="200" y1="104" x2="200" y2="130" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow2)"></line>
+
+              <rect x="80" y="132" width="240" height="52" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="200" y="154" text-anchor="middle" font-size="12">System generates 12 bills</text>
+              <text x="200" y="171" text-anchor="middle" font-size="11" opacity="0.75">status: Pending (FR-4.1)</text>
+              <line x1="200" y1="184" x2="200" y2="210" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow2)"></line>
+
+              <rect x="80" y="212" width="240" height="52" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="200" y="243" text-anchor="middle" font-size="12">Bill waits — days or months pass</text>
+              <line x1="200" y1="264" x2="200" y2="290" stroke="var(--bad)" stroke-width="1.6" marker-end="url(#arrow2)"></line>
+              <text x="216" y="280" font-size="10.5" fill="var(--bad)">past due date + grace</text>
+
+              <rect x="80" y="292" width="240" height="52" fill="var(--accent-soft)" stroke="var(--bad)" stroke-width="1.4"></rect>
+              <text x="200" y="314" text-anchor="middle" font-size="12" fill="var(--bad)">Overdue + late fee stamped</text>
+              <text x="200" y="331" text-anchor="middle" font-size="11" fill="var(--bad)" opacity="0.85">FR-10 · LateFeeSetting applied</text>
+              <line x1="200" y1="344" x2="200" y2="370" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow2)"></line>
+
+              <rect x="80" y="372" width="240" height="52" fill="none" stroke="var(--good)" stroke-width="1.4"></rect>
+              <text x="200" y="403" text-anchor="middle" font-size="12" fill="var(--good)">Payment recorded → Paid</text>
+
+              <rect x="520" y="52" width="240" height="52" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="640" y="74" text-anchor="middle" font-size="12">Admin selects Fee Type</text>
+              <text x="640" y="91" text-anchor="middle" font-size="11" opacity="0.75">+ variant, e.g. size (FR-12.1–2)</text>
+              <line x1="640" y1="104" x2="640" y2="130" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow2)"></line>
+
+              <rect x="520" y="132" width="240" height="52" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="640" y="163" text-anchor="middle" font-size="12">Price auto-fetched from Fee Item</text>
+              <line x1="640" y1="184" x2="640" y2="210" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow2)"></line>
+
+              <rect x="520" y="212" width="240" height="52" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="640" y="243" text-anchor="middle" font-size="12">Admin confirms amount</text>
+              <line x1="640" y1="264" x2="640" y2="290" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow2)"></line>
+
+              <rect x="520" y="292" width="240" height="52" fill="var(--accent-soft)" stroke="var(--good)" stroke-width="1.4"></rect>
+              <text x="640" y="314" text-anchor="middle" font-size="12" fill="var(--good)">Bill + Payment created together</text>
+              <text x="640" y="331" text-anchor="middle" font-size="11" fill="var(--good)" opacity="0.9">status: Paid — no Pending state</text>
+
+              <line x1="768" y1="318" x2="800" y2="318" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"></line>
+              <text x="805" y="322" font-size="16" fill="var(--bad)" opacity="0.7">✕</text>
+              <line x1="330" y1="318" x2="368" y2="318" stroke="currentColor" stroke-width="1" stroke-dasharray="4 4"></line>
+              <text x="440" y="440" text-anchor="middle" font-size="11" fill="currentColor" opacity="0.75">No due date is ever set for these four fee types, so the Overdue branch on the left has no equivalent here.</text>
+            </svg>
+          </div>
+          <figcaption>Same schema, two lifecycles. The left lane is the only one with a waiting period — which is exactly why late fees (FR-10) only make sense, and only apply, to Tuition.</figcaption>
+        </figure>
+
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th></th><th>Tuition</th><th>Books / Exam / Uniform / Bag</th></tr></thead>
+            <tbody>
+              <tr><td>Trigger</td><td>Student enrolled in academic year</td><td>Admin collects a payment (FR-12)</td></tr>
+              <tr><td>Bills created</td><td>12 up front, one per Hijri month</td><td>1 per collection event, on demand</td></tr>
+              <tr><td>Initial status</td><td>Pending</td><td>Paid (created already settled)</td></tr>
+              <tr><td>Price source</td><td><span class="mono">ClassFee</span> — per grade, per year</td><td><span class="mono">FeeItem</span> — per book / size / standard item</td></tr>
+              <tr><td>Can go Overdue</td><td>Yes — nightly sweep (FR-10)</td><td>No — no due date exists</td></tr>
+              <tr><td><span class="mono">month_id</span></td><td>Set (1–12)</td><td>Null</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block" id="data-model">
+        <div class="section-head"><span class="num">04</span><h2 class="section-title">Data Model</h2></div>
+        <div class="prose">
+          <p>Nine tables. The split in Section 3 shows up directly as which columns are populated and which are left null.</p>
+        </div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Entity</th><th>Key fields</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">Student</td><td class="mono">id, student_code, name, father_name, phone, class, status</td><td>—</td></tr>
+              <tr><td class="mono">AcademicYear</td><td class="mono">id, year_name, start_month, end_month, status</td><td>Frozen once superseded (FR-3.5)</td></tr>
+              <tr><td class="mono">HijriMonth</td><td class="mono">id, month_name, sequence (1–12)</td><td>Static reference table, seeded once</td></tr>
+              <tr><td class="mono">FeeType</td><td class="mono">id, name, description, mode</td><td><span class="pill tuition">Enrollment</span> or <span class="pill collection">Collection</span></td></tr>
+              <tr><td class="mono">ClassFee</td><td class="mono">id, academic_year_id, class_name, monthly_amount</td><td>Tuition-only. Snapshotted onto each bill at generation time</td></tr>
+              <tr><td class="mono">FeeItem</td><td class="mono">id, fee_type_id, label, price, active</td><td>Non-Tuition only — one row per book, per uniform size, one "Standard" row for Exam and Bag</td></tr>
+              <tr><td class="mono">LateFeeSetting</td><td class="mono">id, grace_period_days, late_fee_type, late_fee_value</td><td>Single system-wide row, Tuition only</td></tr>
+              <tr><td class="mono">MonthlyBill</td><td class="mono">id, student_id, academic_year_id, month_id, fee_type_id, fee_item_id, amount, late_fee_amount, status, due_date</td><td><span class="mono">month_id</span> null for non-Tuition; <span class="mono">fee_item_id</span> null for Tuition</td></tr>
+              <tr><td class="mono">Payment</td><td class="mono">id, bill_id, payment_date, amount, payment_mode, receipt_no, remarks</td><td>Insert-only — no update or delete path (NFR-1)</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="callout">
+          <strong>Snapshot, don't reference.</strong> <span class="mono">MonthlyBill.amount</span> is copied from <span class="mono">ClassFee</span> or <span class="mono">FeeItem</span> at the moment the bill is created, not looked up live. A price change in Settings only affects bills generated after the change — issued bills keep the amount they were born with.
+        </div>
+      </section>
+
+      <section class="block" id="flows">
+        <div class="section-head"><span class="num">05</span><h2 class="section-title">Key Flows</h2></div>
+
+        <h3 class="sub-title">5.1 Non-Tuition Collection (FR-12)</h3>
+        <div class="prose"><p>The defining property of this flow is that step 4 does two writes in one transaction — there's no intermediate state where a bill exists without a payment, or vice versa.</p></div>
+        <figure class="wide">
+          <div class="diagram-frame">
+            <svg viewBox="0 0 820 380" role="img" aria-label="Sequence: Admin selects a fee type in the UI, which fetches priced fee items from the API and database. Admin picks an item and confirms; the UI posts to the collections endpoint, and the API inserts a Paid bill and a payment in a single database transaction before returning a receipt.">
+              <defs>
+                <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+
+              <text x="80" y="24" text-anchor="middle" font-size="12.5" font-weight="600">Admin</text>
+              <line x1="80" y1="34" x2="80" y2="356" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <text x="290" y="24" text-anchor="middle" font-size="12.5" font-weight="600">UI (SPA)</text>
+              <line x1="290" y1="34" x2="290" y2="356" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <text x="540" y="24" text-anchor="middle" font-size="12.5" font-weight="600">API</text>
+              <line x1="540" y1="34" x2="540" y2="356" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <text x="740" y="24" text-anchor="middle" font-size="12.5" font-weight="600">Database</text>
+              <line x1="740" y1="34" x2="740" y2="356" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <line x1="80" y1="60" x2="286" y2="60" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="185" y="52" text-anchor="middle" font-size="10.5">1 · select Fee Type (Uniform)</text>
+
+              <line x1="290" y1="90" x2="536" y2="90" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="415" y="82" text-anchor="middle" font-size="10.5" class="mono">GET /fee-types/{id}/items</text>
+
+              <line x1="540" y1="120" x2="744" y2="120" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="642" y="112" text-anchor="middle" font-size="10.5">2 · query FeeItem rows</text>
+
+              <line x1="740" y1="148" x2="544" y2="148" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="642" y="141" text-anchor="middle" font-size="10.5" opacity="0.8">sizes + prices</text>
+
+              <line x1="540" y1="176" x2="294" y2="176" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="415" y="169" text-anchor="middle" font-size="10.5" opacity="0.8">size list, price auto-fills on pick</text>
+
+              <line x1="80" y1="206" x2="286" y2="206" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="185" y="198" text-anchor="middle" font-size="10.5">3 · pick size M, confirm payment</text>
+
+              <line x1="290" y1="236" x2="536" y2="236" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="413" y="228" text-anchor="middle" font-size="10.5" class="mono">POST /collections</text>
+
+              <rect x="596" y="256" width="150" height="46" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.3"></rect>
+              <line x1="540" y1="279" x2="596" y2="279" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow3)"></line>
+              <text x="671" y="274" text-anchor="middle" font-size="10.5" fill="var(--accent-strong)" font-weight="600">4 · single txn:</text>
+              <text x="671" y="290" text-anchor="middle" font-size="10" fill="var(--accent-strong)">INSERT Bill(Paid) + Payment</text>
+
+              <line x1="740" y1="316" x2="544" y2="316" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="642" y="309" text-anchor="middle" font-size="10.5" opacity="0.8">committed</text>
+
+              <line x1="540" y1="344" x2="84" y2="344" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow3)"></line>
+              <text x="310" y="337" text-anchor="middle" font-size="10.5">5 · 200 OK + receipt</text>
+            </svg>
+          </div>
+          <figcaption>Steps 1–2 populate the variant dropdown and its price; nothing is written until step 4, and step 4 writes both rows or neither.</figcaption>
+        </figure>
+
+        <h3 class="sub-title">5.2 Late-Fee Overdue Sweep (FR-10)</h3>
+        <div class="prose"><p>The only writer that touches bills after they're created. Runs once nightly; scoped to Tuition by construction, since non-Tuition bills never carry a due date to compare against.</p></div>
+        <figure class="wide">
+          <div class="diagram-frame">
+            <svg viewBox="0 0 700 260" role="img" aria-label="Sequence: the nightly scheduler triggers the API, which selects pending Tuition bills past their due date plus grace period, then updates each to Overdue with a late fee amount computed from the system-wide late fee setting.">
+              <defs>
+                <marker id="arrow4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+
+              <text x="70" y="24" text-anchor="middle" font-size="12.5" font-weight="600">Scheduler</text>
+              <line x1="70" y1="34" x2="70" y2="236" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <text x="360" y="24" text-anchor="middle" font-size="12.5" font-weight="600">API</text>
+              <line x1="360" y1="34" x2="360" y2="236" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <text x="630" y="24" text-anchor="middle" font-size="12.5" font-weight="600">Database</text>
+              <line x1="630" y1="34" x2="630" y2="236" stroke="currentColor" stroke-width="1" opacity="0.35"></line>
+
+              <line x1="70" y1="58" x2="356" y2="58" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow4)"></line>
+              <text x="215" y="50" text-anchor="middle" font-size="10.5" class="mono">POST /internal/late-fee-sweep · 00:15</text>
+
+              <line x1="360" y1="88" x2="626" y2="88" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow4)"></line>
+              <text x="493" y="80" text-anchor="middle" font-size="10.5">SELECT Tuition bills: Pending, due_date + grace &lt; today</text>
+
+              <line x1="630" y1="116" x2="364" y2="116" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow4)"></line>
+              <text x="493" y="109" text-anchor="middle" font-size="10.5" opacity="0.8">matching bills</text>
+
+              <rect x="410" y="136" width="180" height="46" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.3"></rect>
+              <line x1="360" y1="159" x2="410" y2="159" stroke="var(--accent)" stroke-width="1.6" marker-end="url(#arrow4)"></line>
+              <text x="500" y="155" text-anchor="middle" font-size="10" fill="var(--accent-strong)" font-weight="600">UPDATE status = Overdue,</text>
+              <text x="500" y="169" text-anchor="middle" font-size="10" fill="var(--accent-strong)">late_fee_amount = rule(amount)</text>
+
+              <line x1="630" y1="198" x2="364" y2="198" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow4)"></line>
+              <text x="493" y="191" text-anchor="middle" font-size="10.5" opacity="0.8">rows updated</text>
+
+              <line x1="360" y1="222" x2="74" y2="222" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow4)"></line>
+              <text x="215" y="215" text-anchor="middle" font-size="10.5">summary: N bills flagged</text>
+            </svg>
+          </div>
+          <figcaption><span class="mono">rule(amount)</span> reads the single <span class="mono">LateFeeSetting</span> row — flat ₹ or % — there is no per-grade or per-fee-type variant of this rule (FR-11.3).</figcaption>
+        </figure>
+      </section>
+
+      <section class="block" id="api">
+        <div class="section-head"><span class="num">06</span><h2 class="section-title">API Surface</h2></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>Endpoint</th><th>Purpose</th></tr></thead>
+            <tbody>
+              <tr><td><span class="pill post">POST</span> <span class="mono">/auth/login</span></td><td>Admin sign-in, issues JWT (NFR-3)</td></tr>
+              <tr><td><span class="pill get">GET</span>/<span class="pill post">POST</span> <span class="mono">/students</span></td><td>List/search (FR-7), create student</td></tr>
+              <tr><td><span class="pill get">GET</span>/<span class="pill post">PATCH</span> <span class="mono">/students/{id}</span></td><td>View, edit, deactivate (FR-2)</td></tr>
+              <tr><td><span class="pill post">POST</span> <span class="mono">/academic-years/{id}/enroll</span></td><td>Enroll student in Tuition, triggers 12-bill generation (FR-4.1)</td></tr>
+              <tr><td><span class="pill get">GET</span> <span class="mono">/students/{id}/years/{ay}/tuition</span></td><td>12-row Tuition breakdown for one year (FR-4.2)</td></tr>
+              <tr><td><span class="pill post">POST</span> <span class="mono">/bills/{id}/pay</span></td><td>Record payment, flip Tuition bill to Paid (FR-5.2)</td></tr>
+              <tr><td><span class="pill get">GET</span> <span class="mono">/fee-types</span></td><td>List fee types + mode, for the FR-12 dropdown</td></tr>
+              <tr><td><span class="pill get">GET</span> <span class="mono">/fee-types/{id}/items</span></td><td>Priced variants for a non-Tuition fee type (books, sizes)</td></tr>
+              <tr><td><span class="pill post">POST</span> <span class="mono">/collections</span></td><td>Atomic bill + payment creation for non-Tuition fees (FR-12.4)</td></tr>
+              <tr><td><span class="pill get">GET</span>/<span class="pill post">PUT</span> <span class="mono">/settings/class-fees</span></td><td>Per-grade Tuition pricing (FR-11.4)</td></tr>
+              <tr><td><span class="pill get">GET</span>/<span class="pill post">PATCH</span> <span class="mono">/settings/fee-items</span></td><td>Book list, uniform sizes, Exam/Bag standard price (FR-11.5)</td></tr>
+              <tr><td><span class="pill get">GET</span>/<span class="pill post">PUT</span> <span class="mono">/settings/late-fee</span></td><td>Grace period + flat/% rule (FR-11.3)</td></tr>
+              <tr><td><span class="pill get">GET</span> <span class="mono">/reports/{ledger|collected|outstanding-tuition}</span></td><td>Dashboard + FR-8 report data</td></tr>
+              <tr><td><span class="pill get">GET</span> <span class="mono">/reports/export?format=pdf|xlsx</span></td><td>Streams a rendered file (FR-8.6–7)</td></tr>
+              <tr><td><span class="pill post">POST</span> <span class="mono">/internal/late-fee-sweep</span></td><td>Scheduler-only, not exposed to the UI (FR-10)</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block" id="deployment">
+        <div class="section-head"><span class="num">07</span><h2 class="section-title">Deployment Topology</h2></div>
+        <figure class="wide">
+          <div class="diagram-frame">
+            <svg viewBox="0 0 820 340" role="img" aria-label="Single-host Docker Compose deployment: Nginx terminates TLS and routes to the static SPA build and the API container; the API and the scheduler container both connect to a PostgreSQL container backed by a persistent volume.">
+              <defs>
+                <marker id="arrow5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+                  <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+                </marker>
+              </defs>
+
+              <rect x="30" y="20" width="760" height="290" fill="none" stroke="currentColor" stroke-width="1" stroke-dasharray="5 5" opacity="0.55"></rect>
+              <text x="50" y="42" font-size="11" opacity="0.6">docker compose · single host</text>
+
+              <rect x="330" y="60" width="180" height="56" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="420" y="93" text-anchor="middle" font-size="12.5" font-weight="600">Nginx</text>
+              <text x="420" y="108" text-anchor="middle" font-size="10.5" opacity="0.7">TLS termination, :443</text>
+
+              <rect x="130" y="170" width="180" height="56" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="220" y="203" text-anchor="middle" font-size="12.5" font-weight="600">Web</text>
+              <text x="220" y="218" text-anchor="middle" font-size="10.5" opacity="0.7">static SPA build</text>
+
+              <rect x="330" y="170" width="180" height="56" fill="none" stroke="currentColor" stroke-width="1.3"></rect>
+              <text x="420" y="203" text-anchor="middle" font-size="12.5" font-weight="600">API</text>
+              <text x="420" y="218" text-anchor="middle" font-size="10.5" opacity="0.7">uvicorn + gunicorn</text>
+
+              <rect x="530" y="170" width="180" height="56" fill="none" stroke="var(--accent)" stroke-width="1.3"></rect>
+              <text x="620" y="203" text-anchor="middle" font-size="12.5" font-weight="600" fill="var(--accent-strong)">Scheduler</text>
+              <text x="620" y="218" text-anchor="middle" font-size="10.5" fill="var(--accent-strong)" opacity="0.85">cron container</text>
+
+              <rect x="330" y="270" width="180" height="56" fill="none" stroke="currentColor" stroke-width="1.4"></rect>
+              <text x="420" y="303" text-anchor="middle" font-size="12.5" font-weight="600">PostgreSQL</text>
+              <text x="420" y="318" text-anchor="middle" font-size="10.5" opacity="0.7">persistent volume</text>
+
+              <line x1="380" y1="116" x2="260" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow5)"></line>
+              <line x1="420" y1="116" x2="420" y2="168" stroke="currentColor" stroke-width="1.2" marker-end="url(#arrow5)"></line>
+              <text x="420" y="145" text-anchor="middle" font-size="10" opacity="0.7">/api/*</text>
+
+              <line x1="420" y1="226" x2="420" y2="268" stroke="currentColor" stroke-width="1.3" marker-end="url(#arrow5)"></line>
+              <line x1="590" y1="226" x2="450" y2="268" stroke="var(--accent)" stroke-width="1.3" marker-end="url(#arrow5)"></line>
+            </svg>
+          </div>
+          <figcaption>Nginx is the only externally reachable service. The scheduler calls <span class="mono">POST /internal/late-fee-sweep</span> on the API (same trust boundary as §05.2); it does not expose a public route.</figcaption>
+        </figure>
+      </section>
+
+      <section class="block" id="nfr">
+        <div class="section-head"><span class="num">08</span><h2 class="section-title">Non-Functional Requirements → Mechanism</h2></div>
+        <div class="table-scroll">
+          <table>
+            <thead><tr><th>NFR</th><th>Concrete mechanism</th></tr></thead>
+            <tbody>
+              <tr><td>NFR-1 Data integrity</td><td>DB grants: <span class="mono">Payment</span> table is <span class="mono">INSERT</span>-only for the API's role — no <span class="mono">UPDATE</span>/<span class="mono">DELETE</span> grant exists. The one sanctioned bill mutation (late-fee stamping) is scoped to two columns via a dedicated internal endpoint, not general write access.</td></tr>
+              <tr><td>NFR-2 Locale</td><td><span class="mono">amount</span> columns are <span class="mono">numeric(10,2)</span>, rendered with a fixed ₹ prefix. Dates stored as Gregorian <span class="mono">date</span>; Hijri month is a label join via <span class="mono">HijriMonth</span>, never a computed conversion.</td></tr>
+              <tr><td>NFR-3 Authentication</td><td>JWT bearer token, short-lived access token, checked by FastAPI dependency on every route except <span class="mono">/auth/login</span> and the scheduler's internal route (network-restricted instead).</td></tr>
+              <tr><td>NFR-4 Auditability</td><td><span class="mono">created_by</span>, <span class="mono">created_at</span> on <span class="mono">Payment</span> from day one, even with a single shared admin login — groundwork for the future per-user audit log without a schema change later.</td></tr>
+              <tr><td>NFR-5 Scale</td><td>Indexes on <span class="mono">MonthlyBill(student_id, academic_year_id)</span> and <span class="mono">(status, due_date)</span> for the sweep query. Low-thousands of students × ~14 bills/year keeps the whole working set comfortably in memory.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="block" id="open">
+        <div class="section-head"><span class="num">09</span><h2 class="section-title">Open Architecture Questions</h2></div>
+        <div class="two-col">
+          <div class="card">
+            <h4>Sweep frequency</h4>
+            <p>Nightly cron assumed (00:15). If admins need same-day Overdue flags for bills due that morning, the sweep may need to run more than once a day, or overdue status may need to be computed lazily on read instead of stamped by a job.</p>
+          </div>
+          <div class="card">
+            <h4>Retiring a Fee Item</h4>
+            <p>Marking a book or uniform size <span class="mono">active = false</span> hides it from the FR-12 dropdown going forward. Because bill amounts are snapshotted (Section 4), this is safe to do mid-year without touching history — but needs a "why is this greyed out" affordance in the UI.</p>
+          </div>
+          <div class="card">
+            <h4>Export library choice</h4>
+            <p>WeasyPrint (PDF) and openpyxl (Excel) assumed as the lowest-friction fit for a Python backend. Neither is a hard requirement — swappable if the report layouts turn out to need something heavier.</p>
+          </div>
+          <div class="card">
+            <h4>Concurrent collection</h4>
+            <p>Two admins recording the same student's Uniform payment seconds apart isn't prevented by anything beyond normal transaction isolation — worth a duplicate-detection check (same student, fee item, day) before this ships, or it's an accepted risk given a single-admin-login reality.</p>
+          </div>
+        </div>
+      </section>
+
+      <footer class="doc-footer">
+        Reads alongside <span class="mono">fee-management-system-requirements-v3.md</span> — that document owns the functional requirements (FR-1–12); this one owns how they're built.
+      </footer>
+
+    </main>
+  </div>
+</div>
+</body>
+</html>

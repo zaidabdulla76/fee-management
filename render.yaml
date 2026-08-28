@@ -1,0 +1,74 @@
+# Hijri Fee Ledger on Render.
+# UI stays on Netlify; this Blueprint is API + Postgres + nightly sweep.
+#
+# After first deploy, copy the API URL into netlify.toml [[redirects]] /api/*
+# if Render assigned a suffix (https://hijri-fee-api.onrender.com).
+
+databases:
+  - name: hijri-fee-db
+    postgresMajorVersion: "16"
+    region: singapore
+    plan: 0.1c-256mb
+    databaseName: fee
+    user: fee
+    ipAllowList: []
+
+services:
+  - type: web
+    name: hijri-fee-api
+    runtime: docker
+    plan: starter
+    region: singapore
+    dockerfilePath: ./backend/Dockerfile
+    dockerContext: ./backend
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    maxShutdownDelaySeconds: 30
+    buildFilter:
+      paths:
+        - backend/**
+        - render.yaml
+    envVars:
+      - key: DATABASE_URL_ADMIN
+        fromDatabase:
+          name: hijri-fee-db
+          property: connectionString
+      - key: FEE_APP_PASSWORD
+        generateValue: true
+      - key: JWT_SECRET
+        generateValue: true
+      - key: INTERNAL_SWEEP_TOKEN
+        generateValue: true
+      # After the Netlify URL exists, replace * in the Dashboard with
+      # https://your-site.netlify.app (and any custom domain).
+      - key: CORS_ORIGINS
+        value: "*"
+      - key: WEB_CONCURRENCY
+        value: "1"
+      - key: GUNICORN_TIMEOUT
+        value: "120"
+
+  - type: cron
+    name: hijri-fee-sweep
+    runtime: docker
+    plan: starter
+    region: singapore
+    schedule: "15 0 * * *"
+    dockerfilePath: ./infra/scheduler/Dockerfile
+    dockerContext: ./infra/scheduler
+    dockerCommand: python -u /app/sweep.py --once
+    buildFilter:
+      paths:
+        - infra/scheduler/**
+        - render.yaml
+    envVars:
+      - key: API_URL
+        fromService:
+          name: hijri-fee-api
+          type: web
+          property: hostport
+      - key: INTERNAL_SWEEP_TOKEN
+        fromService:
+          name: hijri-fee-api
+          type: web
+          envVarKey: INTERNAL_SWEEP_TOKEN

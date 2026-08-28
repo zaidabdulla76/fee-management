@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+backend/.venv/
+.netlify/
+*.log
+.DS_Store
+Thumbs.db
+.vite/
+__pycache__/
+*.pyc
+pgdata/
