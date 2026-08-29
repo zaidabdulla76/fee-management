@@ -68,7 +68,62 @@ Vite proxies `/api` → `http://localhost:8000`.
 
 Or skip Vite and use the full Docker UI at **https://localhost**.
 
+## Cloud without a credit card
+
+Render, Railway, Fly, and AWS all require a Visa/Mastercard. If you have **no card**, use this split instead:
+
+| Piece | Host | Card? |
+|-------|------|--------|
+| Admin UI | [Netlify](https://app.netlify.com) | No |
+| PostgreSQL | [Neon](https://console.neon.tech) (GitHub login) | No |
+| API | [Koyeb](https://app.koyeb.com) Hobby, or [Hugging Face Spaces](https://huggingface.co/new-space) (Docker) | Usually no |
+| Nightly sweep | GitHub Action (`.github/workflows/late-fee-sweep.yml`) | No |
+
+### 1. Neon (database)
+
+1. Sign up at [console.neon.tech](https://console.neon.tech) with GitHub.
+2. New project, region **Singapore** if available.
+3. Copy the connection URI (Dashboard → Connection details). It looks like `postgresql://…@….neon.tech/neondb?sslmode=require`.
+
+### 2. API (try Koyeb first)
+
+1. [Koyeb](https://app.koyeb.com) → GitHub → this repo.
+2. Dockerfile path: `backend/Dockerfile` (or the root `Dockerfile` for Hugging Face).
+3. Instance type: **Free**. Port **8000** for `backend/Dockerfile`, or **7860** for the root `Dockerfile`.
+4. Environment variables:
+
+| Key | Value |
+|-----|--------|
+| `DATABASE_URL_ADMIN` | Neon URI |
+| `FEE_APP_PASSWORD` | any long random string |
+| `JWT_SECRET` | long random string |
+| `INTERNAL_SWEEP_TOKEN` | long random string |
+| `CORS_ORIGINS` | `*` (or your Netlify URL later) |
+| `WEB_CONCURRENCY` | `1` |
+| `PGSSLMODE` | `require` |
+
+If Koyeb asks for a card, create a **Docker** Space on Hugging Face instead, set the same env vars as **Secrets**, and use the **root** `Dockerfile` (`app_port` 7860). Change `admin` / `admin123` immediately — free Spaces are public URLs.
+
+### 3. GitHub Action (sweep)
+
+Repo → **Settings → Secrets and variables → Actions**:
+
+- `API_URL` — Koyeb or Space URL (no trailing slash)
+- `INTERNAL_SWEEP_TOKEN` — same as on the API
+
+The workflow runs daily at 00:15 UTC. You can also run it with **Actions → Late-fee sweep → Run workflow**.
+
+### 4. Netlify (UI)
+
+Deploy this repo on Netlify, then set `/api/*` in `netlify.toml` to your Koyeb/Space URL:
+
+`to = "https://YOUR-API-HOST/api/:splat"`
+
+Student fee data on a free public host is weakly isolated. For a madrasa ledger, **Docker on this PC** (`docker compose up --build` → https://localhost) is the safest no-card option.
+
 ## Cloud (Netlify UI + Render API)
+
+Use this path only when you have a Visa/Mastercard for Render billing.
 
 | Piece | Host |
 |-------|------|

@@ -1,0 +1,31 @@
+# Nightly late-fee sweep — no Render cron / no credit card.
+# GitHub-hosted runners are free for public repos (and a large quota on private).
+#
+# Repo Settings → Secrets and variables → Actions:
+#   API_URL                 e.g. https://your-app.koyeb.app
+#   INTERNAL_SWEEP_TOKEN    same value as on the API service
+
+name: Late-fee sweep
+
+on:
+  schedule:
+    - cron: "15 0 * * *"
+  workflow_dispatch:
+
+jobs:
+  sweep:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST /api/internal/late-fee-sweep
+        env:
+          API_URL: ${{ secrets.API_URL }}
+          TOKEN: ${{ secrets.INTERNAL_SWEEP_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${API_URL}" ] || [ -z "${TOKEN}" ]; then
+            echo "Set repository secrets API_URL and INTERNAL_SWEEP_TOKEN"
+            exit 1
+          fi
+          curl -fsS -X POST \
+            -H "Authorization: Bearer ${TOKEN}" \
+            "${API_URL%/}/api/internal/late-fee-sweep"

@@ -21,10 +21,21 @@ def sqlalchemy_url(url: str) -> str:
     if raw.startswith("postgresql://") and "+psycopg" not in raw.split("://", 1)[0]:
         raw = "postgresql+psycopg://" + raw[len("postgresql://") :]
 
-    if os.environ.get("RENDER") and "sslmode=" not in raw:
+    if "sslmode=" not in raw and _needs_tls(raw):
         joiner = "&" if "?" in raw else "?"
         raw = f"{raw}{joiner}sslmode=require"
     return raw
+
+
+def _needs_tls(url: str) -> bool:
+    """Managed Postgres (Neon, Render, Koyeb) requires TLS. Local Docker does not."""
+    if os.environ.get("RENDER") or os.environ.get("PGSSLMODE") == "require":
+        return True
+    host = (urlparse(url.replace("postgresql+psycopg://", "postgresql://", 1)).hostname or "").lower()
+    return any(
+        part in host
+        for part in ("neon.tech", "render.com", "koyeb.app", "amazonaws.com")
+    )
 
 
 def parse_postgres(url: str):

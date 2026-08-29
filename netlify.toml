@@ -1,5 +1,6 @@
 # Netlify hosts the Vite + React SPA (frontend/).
-# API, Postgres, and the nightly sweep run on Render (see render.yaml).
+# API + Postgres: Render (card) or Neon + Koyeb/Hugging Face (no card).
+# Point /api/* at whichever API URL you actually have.
 
 [build]
   base = "frontend"
