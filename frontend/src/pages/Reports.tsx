@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { reportsApi, studentsApi } from '../api';
+import { reportsApi, settingsApi, studentsApi } from '../api';
 import { useYear } from '../context/YearContext';
 import { Button, Card, EmptyState, PageHeader, Select } from '../components/ui';
 import { downloadAuthed, formatDate, formatINR } from '../utils/format';
@@ -8,7 +8,6 @@ import { downloadAuthed, formatDate, formatINR } from '../utils/format';
 const reportKinds = [
   { id: 'tuition-status', label: 'Tuition paid / pending students' },
   { id: 'collections-by-type', label: 'Collections by fee type' },
-  { id: 'outstanding-tuition', label: 'Outstanding tuition' },
   { id: 'year-summary', label: 'Academic year summary' },
   { id: 'student-ledger', label: 'Individual student ledger' },
 ];
@@ -17,15 +16,21 @@ export default function Reports() {
   const { selectedYearId, selectedYear } = useYear();
   const [kind, setKind] = useState('tuition-status');
   const [studentId, setStudentId] = useState('');
+  const [selectedClass, setSelectedClass] = useState('');
 
   const { data: students = [] } = useQuery({
     queryKey: ['students-all'],
     queryFn: async () => (await studentsApi.list()).data,
   });
 
+  const { data: classes = [] } = useQuery({
+    queryKey: ['classes'],
+    queryFn: async () => (await settingsApi.classes()).data,
+  });
+
   const queryKey = useMemo(
-    () => ['report', kind, selectedYearId, studentId],
-    [kind, selectedYearId, studentId]
+    () => ['report', kind, selectedYearId, studentId, selectedClass],
+    [kind, selectedYearId, studentId, selectedClass]
   );
 
   const { data, isLoading, error } = useQuery({
@@ -35,25 +40,39 @@ export default function Reports() {
       (kind !== 'student-ledger' || !!studentId),
     queryFn: async () => {
       if (kind === 'tuition-status')
-        return (await reportsApi.tuitionStatus(selectedYearId)).data;
+        return (await reportsApi.tuitionStatus(selectedYearId, selectedClass || undefined)).data;
       if (kind === 'collections-by-type')
         return (await reportsApi.collectionsByType(selectedYearId)).data;
-      if (kind === 'outstanding-tuition')
-        return (await reportsApi.outstanding(selectedYearId)).data;
       if (kind === 'year-summary')
         return (await reportsApi.yearSummary(selectedYearId)).data;
       return (await reportsApi.studentLedger(studentId)).data;
     },
   });
 
-  function exportFile(format) {
-    const params =
+  function exportFile(format: string) {
+    const params: Record<string, string> =
       kind === 'student-ledger'
         ? { studentId, format }
         : { academicYearId: selectedYearId, format };
+    if (selectedClass) {
+      params.classId = selectedClass;
+    }
     const url = reportsApi.exportUrl(kind, params);
     downloadAuthed(url, `${kind}.${format === 'xlsx' ? 'xlsx' : 'pdf'}`);
   }
+
+  const tuitionStatusRows = useMemo(() => {
+    if (!data?.rows) return [];
+    if (!selectedClass) return data.rows;
+    return data.rows.filter(
+      (r: { student: { class: string } }) => r.student.class === selectedClass
+    );
+  }, [data, selectedClass]);
+
+  const filteredStudents = useMemo(() => {
+    if (!selectedClass) return students;
+    return students.filter((s: { class?: string }) => s.class === selectedClass);
+  }, [students, selectedClass]);
 
   return (
     <div>
@@ -72,7 +91,7 @@ export default function Reports() {
         }
       />
 
-      <Card className="mb-4 grid gap-3 p-4 md:grid-cols-2">
+      <Card className="mb-4 grid gap-3 p-4 md:grid-cols-3">
         <Select label="Report" value={kind} onChange={(e) => setKind(e.target.value)}>
           {reportKinds.map((r) => (
             <option key={r.id} value={r.id}>
@@ -80,6 +99,20 @@ export default function Reports() {
             </option>
           ))}
         </Select>
+
+        <Select
+          label="Class"
+          value={selectedClass}
+          onChange={(e) => setSelectedClass(e.target.value)}
+        >
+          <option value="">All classes</option>
+          {classes.map((c: { id: string; name: string }) => (
+            <option key={c.id} value={c.name}>
+              Class {c.name}
+            </option>
+          ))}
+        </Select>
+
         {kind === 'student-ledger' ? (
           <Select
             label="Student"
@@ -87,7 +120,7 @@ export default function Reports() {
             onChange={(e) => setStudentId(e.target.value)}
           >
             <option value="">Select student</option>
-            {students.map((s) => (
+            {filteredStudents.map((s: { id: string; student_code: string; name: string }) => (
               <option key={s.id} value={s.id}>
                 {s.student_code} — {s.name}
               </option>
@@ -101,7 +134,7 @@ export default function Reports() {
       ) : isLoading ? (
         <EmptyState message="Loading report…" />
       ) : error ? (
-        <EmptyState message={error.message || 'Failed to load report'} />
+        <EmptyState message={(error as Error).message || 'Failed to load report'} />
       ) : !data ? (
         <EmptyState message="Choose options to view the report." />
       ) : (
@@ -112,7 +145,6 @@ export default function Reports() {
               <SummaryTile label="Fully paid" value={data.fully_paid_students} />
               <SummaryTile label="With dues" value={data.students_with_dues} />
               <SummaryTile label="Total collected" value={formatINR(data.total_collected)} />
-              <SummaryTile label="Late fees collected" value={formatINR(data.late_fees_collected)} />
               <SummaryTile label="Outstanding" value={formatINR(data.outstanding_amount)} />
             </div>
           ) : null}
@@ -120,7 +152,7 @@ export default function Reports() {
           {kind === 'tuition-status' ? (
             <Table
               headers={['Code', 'Name', 'Class', 'Paid', 'Pending', 'Status', 'Outstanding']}
-              rows={(data.rows || []).map((r) => [
+              rows={tuitionStatusRows.map((r: { student: { student_code: string; name: string; class: string }; paid_months: number; pending_months: number; status: string; outstanding: number }) => [
                 r.student.student_code,
                 r.student.name,
                 r.student.class,
@@ -134,12 +166,9 @@ export default function Reports() {
 
           {kind === 'collections-by-type' ? (
             <div>
-              <div className="border-b border-border px-4 py-3 text-sm text-muted">
-                Late fees collected: <strong>{formatINR(data.lateFeesCollected)}</strong>
-              </div>
               <Table
                 headers={['Fee type', 'Total', 'Count', 'Fee item breakdown']}
-                rows={(data.rows || []).map((r) => [
+                rows={(data.rows || []).map((r: { fee_type: string; total: number; count: number; items?: { label: string; total: number; count: number }[] }) => [
                   r.fee_type,
                   formatINR(r.total),
                   r.count,
@@ -151,21 +180,6 @@ export default function Reports() {
             </div>
           ) : null}
 
-          {kind === 'outstanding-tuition' ? (
-            <Table
-              headers={['Code', 'Name', 'Month', 'Status', 'Base', 'Late fee', 'Total due']}
-              rows={(data.rows || []).map((r) => [
-                r.student.student_code,
-                r.student.name,
-                r.month?.month_name,
-                r.bill.status,
-                formatINR(r.bill.amount),
-                formatINR(r.bill.late_fee_amount || 0),
-                formatINR(r.total_due),
-              ])}
-            />
-          ) : null}
-
           {kind === 'student-ledger' ? (
             <Table
               headers={[
@@ -174,19 +188,15 @@ export default function Reports() {
                 'Fee type',
                 'Month/Item',
                 'Status',
-                'Base',
-                'Late',
                 'Amount',
                 'Receipt',
               ]}
-              rows={(data.rows || []).map((r) => [
+              rows={(data.rows || []).map((r: { date: string; academic_year: string; fee_type: string; month?: string; fee_item?: string; status: string; amount: number; receipt_no?: string }) => [
                 formatDate(r.date),
                 r.academic_year,
                 r.fee_type,
                 r.month || r.fee_item || '—',
                 r.status,
-                formatINR(r.base_amount),
-                formatINR(r.late_fee_amount || 0),
                 formatINR(r.amount),
                 r.receipt_no || '—',
               ])}
@@ -198,7 +208,7 @@ export default function Reports() {
   );
 }
 
-function SummaryTile({ label, value }) {
+function SummaryTile({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="rounded-lg border border-border bg-slate-50 p-4">
       <p className="text-xs text-muted">{label}</p>
@@ -207,13 +217,13 @@ function SummaryTile({ label, value }) {
   );
 }
 
-function Table({ headers, rows }) {
+function Table({ headers, rows }: { headers: string[]; rows: (string | number | React.ReactNode)[][] }) {
   if (!rows.length) {
     return <div className="p-6"><EmptyState message="No rows for this report." /></div>;
   }
   return (
     <table className="data-table">
-      <thead className="">
+      <thead>
         <tr>
           {headers.map((h) => (
             <th key={h} className="px-4 py-3">

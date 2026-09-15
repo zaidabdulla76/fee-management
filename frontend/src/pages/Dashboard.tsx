@@ -40,29 +40,53 @@ export default function Dashboard() {
       ) : null}
 
       {error ? (
-        <EmptyState title="Could not load" message={error.message || 'Please try again'} />
+        <EmptyState title="Could not load" message={(error as Error).message || 'Please try again'} />
       ) : isLoading ? (
         <EmptyState message="Loading…" />
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard label="Active students" value={data.activeStudents} />
-          <StatCard
-            label="Fees collected"
-            value={formatINR(data.totalCollectedThisYear)}
-            hint="This school year"
-            tone="accent"
-          />
-          <StatCard
-            label="Tuition still due"
-            value={formatINR(data.tuitionPendingAmount)}
-            hint="Includes late fees"
-            tone="warn"
-          />
-          <StatCard
-            label="Students with unpaid tuition"
-            value={data.studentsWithPendingTuition}
-            tone="danger"
-          />
+        <div className="space-y-4">
+          {/* Top 4 Stat Cards */}
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <StatCard label="Active students" value={data.activeStudents} />
+            <StatCard
+              label="Tuition collected"
+              value={formatINR(data.tuitionCollectedThisYear ?? data.totalCollectedThisYear)}
+              hint="This school year"
+              tone="accent"
+            />
+            <StatCard
+              label="Tuition still due"
+              value={formatINR(data.tuitionPendingAmount)}
+              hint="Unpaid tuition"
+              tone="warn"
+            />
+            <StatCard
+              label="Students with unpaid tuition"
+              value={data.studentsWithPendingTuition}
+              tone="danger"
+            />
+            <StatCard
+              label="Late fees collected"
+              value={formatINR(data.lateFeesCollectedThisYear ?? 0)}
+              hint="Tuition late fees this year"
+              tone="warn"
+            />
+          </div>
+
+          {/* New Requested Tiles: Admission and Collection Fees */}
+          <div className="grid gap-4 sm:grid-cols-2">
+            <StatCard
+              label={`Admission fee collected for academic year ${selectedYear?.year_name || ''}`}
+              value={formatINR(data.admissionCollectedThisYear ?? 0)}
+              hint="Initial admission fees"
+              tone="accent"
+            />
+            <StatCard
+              label="Amount collected from collection fee type"
+              value={formatINR(data.collectionFeeCollectedThisYear ?? 0)}
+              hint="Pay as you go fees (books, exams, uniforms, etc.)"
+            />
+          </div>
         </div>
       )}
     </div>

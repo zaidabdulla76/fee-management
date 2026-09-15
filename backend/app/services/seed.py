@@ -32,14 +32,16 @@ def seed_if_empty(db: Session) -> None:
     for seq, name in HIJRI_MONTHS:
         db.add(HijriMonth(id=new_id(), month_name=name, sequence=seq))
 
-    tuition = FeeType(id=new_id(), name="Tuition", description="Monthly enrollment-based tuition", mode="enrollment")
+    tuition = FeeType(id=new_id(), name="Tuition", description="Monthly tuition fee", mode="tuition")
+    admission = FeeType(id=new_id(), name="Admission", description="Initial admission fee", mode="admission")
     books = FeeType(id=new_id(), name="Books", description="Course / book collection", mode="collection")
     exam = FeeType(id=new_id(), name="Exam", description="Exam fee", mode="collection")
     uniform = FeeType(id=new_id(), name="Uniform", description="Uniform by size", mode="collection")
     bag = FeeType(id=new_id(), name="Bag", description="School bag", mode="collection")
-    for ft in (tuition, books, exam, uniform, bag):
+    for ft in (tuition, admission, books, exam, uniform, bag):
         db.add(ft)
     db.flush()
+    db.add(FeeItem(id=new_id(), fee_type_id=admission.id, label="Admission Fee", price=Decimal("1000")))
 
     db.add(FeeItem(id=new_id(), fee_type_id=books.id, label="Course 5 – Mathematics", price=Decimal("450")))
     db.add(FeeItem(id=new_id(), fee_type_id=books.id, label="Course 5 – English", price=Decimal("400")))

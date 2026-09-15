@@ -11,30 +11,35 @@ export const dashboardApi = {
 };
 
 export const studentsApi = {
-  list: (params) => api.get('/students', { params }),
-  create: (data) => api.post('/students', data),
-  get: (id) => api.get(`/students/${id}`),
-  update: (id, data) => api.put(`/students/${id}`, data),
-  setStatus: (id, status) => api.patch(`/students/${id}/status`, { status }),
-  tuition: (id, yearId) => api.get(`/students/${id}/years/${yearId}/tuition`),
-  payments: (id) => api.get(`/students/${id}/payments`),
+  list: (params?: Record<string, unknown>) => api.get('/students', { params }),
+  create: (data: Record<string, unknown>) => api.post('/students', data),
+  get: (id: string) => api.get(`/students/${id}`),
+  update: (id: string, data: Record<string, unknown>) => api.put(`/students/${id}`, data),
+  setStatus: (id: string, status: string) => api.patch(`/students/${id}/status`, { status }),
+  promote: (data: { student_ids: string[]; target_class?: string }) =>
+    api.post('/students/promote', data),
+  tuition: (id: string, yearId: string) => api.get(`/students/${id}/years/${yearId}/tuition`),
+  payments: (id: string) => api.get(`/students/${id}/payments`),
 };
 
 export const yearsApi = {
   list: () => api.get('/academic-years'),
   nextStart: () => api.get('/academic-years/next-start'),
-  create: (data) => api.post('/academic-years', data),
-  get: (id) => api.get(`/academic-years/${id}`),
+  create: (data: Record<string, unknown>) => api.post('/academic-years', data),
+  get: (id: string) => api.get(`/academic-years/${id}`),
+  delete: (id: string) => api.delete(`/academic-years/${id}`),
 };
 
 export const billingApi = {
   payBill: (id: string, data: Record<string, unknown>) => api.post(`/bills/${id}/pay`, data),
+  payTuitionBulk: (data: Record<string, unknown>) => api.post('/tuition/collect-bulk', data),
   collect: (data: Record<string, unknown>) => api.post('/collections', data),
   feeItems: (feeTypeId: string) =>
     api.get(`/fee-types/${feeTypeId}/items`),
   feeItemsQuery: (feeTypeId: string) =>
     api.get('/fee-items', { params: { feeTypeId } }),
   receiptUrl: (paymentId: string) => `/api/payments/${paymentId}/receipt.pdf`,
+  receiptByNoUrl: (receiptNo: string) => `/api/payments/receipt/${receiptNo}/pdf`,
 };
 
 export const settingsApi = {
@@ -44,6 +49,7 @@ export const settingsApi = {
       ? api.put(`/settings/fee-types/${data.id}`, data)
       : api.post('/settings/fee-types', data),
   retireFeeType: (id: string) => api.patch(`/settings/fee-types/${id}/retire`),
+  deleteFeeType: (id: string) => api.delete(`/settings/fee-types/${id}`),
   classes: () => api.get('/settings/classes'),
   addClass: (name: string) => api.post('/settings/classes', { name }),
   retireClass: (id: string) => api.patch(`/settings/classes/${id}/retire`),
@@ -62,8 +68,8 @@ export const settingsApi = {
 };
 
 export const reportsApi = {
-  tuitionStatus: (academicYearId: string) =>
-    api.get('/reports/tuition-status', { params: { academicYearId } }),
+  tuitionStatus: (academicYearId: string, classId?: string) =>
+    api.get('/reports/tuition-status', { params: { academicYearId, ...(classId ? { classId } : {}) } }),
   collectionsByType: (academicYearId: string) =>
     api.get('/reports/collections-by-type', { params: { academicYearId } }),
   outstanding: (academicYearId: string) =>

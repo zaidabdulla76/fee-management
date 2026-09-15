@@ -49,10 +49,13 @@ def next_receipt_no(db: Session, payment_date: date) -> str:
 def get_tuition_fee_type(db: Session) -> FeeType:
     ft = (
         db.query(FeeType)
-        .filter(FeeType.mode == "enrollment", FeeType.active.is_(True))
+        .filter(FeeType.mode.in_(["tuition", "enrollment"]) | (FeeType.name == "Tuition"))
+        .filter(FeeType.active.is_(True))
         .order_by(FeeType.name.asc())
         .first()
     )
+    if not ft:
+        ft = db.query(FeeType).filter(FeeType.name == "Tuition").first()
     if not ft:
         raise HTTPException(status_code=500, detail="Tuition fee type is not configured")
     return ft

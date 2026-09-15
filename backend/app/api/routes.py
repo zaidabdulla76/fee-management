@@ -37,7 +37,7 @@ from app.services.billing import (
     suggest_next_year_start,
 )
 from app.services.late_fee import apply_late_fees
-from app.services.payments import collect_non_tuition, pay_tuition_bill
+from app.services.payments import collect_non_tuition, pay_tuition_bill, pay_tuition_bills_bulk
 from app.services.reports import (
     export_pdf,
     export_xlsx,
@@ -72,12 +72,27 @@ class StatusIn(BaseModel):
     status: str
 
 
+class PromoteIn(BaseModel):
+    student_ids: list[str]
+    target_class: Optional[str] = None
+
+
 class YearIn(BaseModel):
     year_name: str
     start_date: date
 
 
 class PayIn(BaseModel):
+    payment_date: date
+    payment_mode: str
+    receipt_no: Optional[str] = None
+    remarks: Optional[str] = None
+
+
+class BulkTuitionIn(BaseModel):
+    student_id: str
+    academic_year_id: str
+    bill_ids: list[str]
     payment_date: date
     payment_mode: str
     receipt_no: Optional[str] = None
@@ -214,27 +229,56 @@ def dashboard(
         return {
             "activeStudents": active_students,
             "totalCollectedThisYear": 0,
+            "tuitionCollectedThisYear": 0,
+            "admissionCollectedThisYear": 0,
+            "collectionFeeCollectedThisYear": 0,
             "tuitionPendingAmount": 0,
             "studentsWithPendingTuition": 0,
             "currentYear": None,
         }
     tuition = get_tuition_fee_type(db)
+    fee_types = {t.id: t for t in db.query(FeeType).all()}
     bills = db.query(MonthlyBill).filter(MonthlyBill.academic_year_id == year.id).all()
-    bill_ids = [b.id for b in bills]
-    payments = db.query(Payment).filter(Payment.bill_id.in_(bill_ids or ["__none__"])).all()
+    bill_map = {b.id: b for b in bills}
+    payments = db.query(Payment).filter(Payment.bill_id.in_(list(bill_map.keys()) or ["__none__"])).all()
+
+    tuition_payments = []
+    admission_payments = []
+    collection_payments = []
+    for p in payments:
+        b = bill_map.get(p.bill_id)
+        if not b:
+            continue
+        ft = fee_types.get(b.fee_type_id)
+        if not ft:
+            continue
+        if ft.id == tuition.id or ft.mode in ("tuition", "enrollment") or ft.name.lower() == "tuition":
+            tuition_payments.append(p)
+        elif ft.mode == "admission" or ft.name.lower() == "admission":
+            admission_payments.append(p)
+        else:
+            collection_payments.append(p)
+
     pending = [
         b
         for b in bills
-        if b.fee_type_id == tuition.id and b.status in ("Pending", "Overdue")
+        if (
+            b.fee_type_id == tuition.id
+            or (fee_types.get(b.fee_type_id) and fee_types[b.fee_type_id].mode in ("tuition", "enrollment"))
+            or (fee_types.get(b.fee_type_id) and fee_types[b.fee_type_id].name.lower() == "tuition")
+        )
+        and b.status in ("Pending", "Overdue")
     ]
     return {
         "activeStudents": active_students,
         "totalCollectedThisYear": float(sum(Decimal(p.amount) for p in payments)),
-        "tuitionPendingAmount": float(
-            sum(Decimal(b.amount) + Decimal(b.late_fee_amount or 0) for b in pending)
-        ),
+        "tuitionCollectedThisYear": float(sum(Decimal(p.amount) for p in tuition_payments)),
+        "admissionCollectedThisYear": float(sum(Decimal(p.amount) for p in admission_payments)),
+        "collectionFeeCollectedThisYear": float(sum(Decimal(p.amount) for p in collection_payments)),
+        "tuitionPendingAmount": float(sum(Decimal(b.amount) + Decimal(b.late_fee_amount or 0) for b in pending)),
         "studentsWithPendingTuition": len({b.student_id for b in pending}),
         "currentYear": year_dict(year),
+        "lateFeesCollectedThisYear": float(sum(Decimal(p.late_fee_amount or 0) for p in tuition_payments)),
     }
 
 
@@ -357,6 +401,46 @@ def set_status(
     return student_dict(student)
 
 
+@router.post("/students/promote")
+def promote_students(
+    body: PromoteIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if not body.student_ids:
+        raise HTTPException(status_code=400, detail="No students selected")
+
+    class_grades = db.query(ClassGrade).filter(ClassGrade.active.is_(True)).all()
+
+    def class_sort_key(c):
+        try:
+            return (0, int(c.name))
+        except ValueError:
+            return (1, c.name)
+
+    class_names = [c.name for c in sorted(class_grades, key=class_sort_key)]
+
+    students = db.query(Student).filter(Student.id.in_(body.student_ids)).all()
+    if not students:
+        raise HTTPException(status_code=404, detail="No students found")
+
+    promoted = []
+    for s in students:
+        if body.target_class:
+            s.class_name = body.target_class
+        else:
+            if s.class_name in class_names:
+                idx = class_names.index(s.class_name)
+                if idx + 1 < len(class_names):
+                    s.class_name = class_names[idx + 1]
+        promoted.append(s)
+
+    db.commit()
+    for s in promoted:
+        db.refresh(s)
+    return {"promoted_count": len(promoted), "students": [student_dict(s) for s in promoted]}
+
+
 @router.get("/students/{student_id}/years/{year_id}/tuition")
 def student_tuition(
     student_id: str,
@@ -465,6 +549,35 @@ def get_year(year_id: str, db: Session = Depends(get_db), user: User = Depends(g
     return year_dict(year)
 
 
+@router.delete("/academic-years/{year_id}")
+def delete_academic_year(year_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    year = db.get(AcademicYear, year_id)
+    if not year:
+        raise HTTPException(status_code=404, detail="Academic year not found")
+    if year.status == "Frozen":
+        raise HTTPException(status_code=400, detail="Frozen academic year cannot be deleted (FR-3.5). Retire instead.")
+    has_bills = db.query(MonthlyBill).filter(MonthlyBill.academic_year_id == year_id).first() is not None
+    if has_bills:
+        b_ids_q = db.query(MonthlyBill.id).filter(MonthlyBill.academic_year_id == year_id).all()
+        b_ids = [r[0] for r in b_ids_q]
+        if b_ids:
+            has_payments = db.query(Payment).filter(Payment.bill_id.in_(b_ids)).first() is not None
+            if has_payments:
+                raise HTTPException(status_code=400, detail="Academic year has payment history and cannot be deleted (NFR-1).")
+    db.query(ClassFee).filter(ClassFee.academic_year_id == year_id).delete()
+    bills = db.query(MonthlyBill).filter(MonthlyBill.academic_year_id == year_id).all()
+    bill_ids = [b.id for b in bills]
+    if bill_ids:
+        payments = db.query(Payment).filter(Payment.bill_id.in_(bill_ids)).all()
+        for p in payments:
+            db.delete(p)
+        for b in bills:
+            db.delete(b)
+    db.delete(year)
+    db.commit()
+    return {"id": year_id, "deleted": True}
+
+
 @router.post("/academic-years/{year_id}/enroll")
 def enroll(
     year_id: str,
@@ -493,6 +606,33 @@ def pay_bill(
         created_by=user.id,
     )
     return {"payment": payment_dict(result["payment"]), "bill": bill_dict(result["bill"])}
+
+
+@router.post("/tuition/collect-bulk", status_code=201)
+def collect_tuition_bulk(
+    body: BulkTuitionIn,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    result = pay_tuition_bills_bulk(
+        db,
+        student_id=body.student_id,
+        academic_year_id=body.academic_year_id,
+        bill_ids=body.bill_ids,
+        payment_date=body.payment_date,
+        payment_mode=body.payment_mode,
+        receipt_no=body.receipt_no,
+        remarks=body.remarks,
+        created_by=user.id,
+    )
+    return {
+        "payment": payment_dict(result["payment"]),
+        "payments": [payment_dict(p) for p in result["payments"]],
+        "bills": [bill_dict(b) for b in result["bills"]],
+        "receipt_no": result["receipt_no"],
+        "total_amount": result["total_amount"],
+        "student": student_dict(result["student"]),
+    }
 
 
 @router.post("/collections", status_code=201)
@@ -586,8 +726,8 @@ def settings_fee_types(db: Session = Depends(get_db), user: User = Depends(get_c
 
 @router.post("/settings/fee-types", status_code=201)
 def create_fee_type(body: FeeTypeIn, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    if body.mode not in ("enrollment", "collection"):
-        raise HTTPException(status_code=400, detail="mode must be enrollment or collection")
+    if body.mode not in ("admission", "collection", "tuition", "enrollment"):
+        raise HTTPException(status_code=400, detail="mode must be admission, collection, or tuition")
     row = FeeType(
         id=new_id(),
         name=body.name.strip(),
@@ -627,6 +767,37 @@ def retire_fee_type(item_id: str, db: Session = Depends(get_db), user: User = De
     row.active = False
     db.commit()
     return {"id": row.id, "active": False}
+
+
+@router.delete("/settings/fee-types/{item_id}")
+def delete_fee_type(item_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
+    row = db.get(FeeType, item_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Fee type not found")
+    if row.active:
+        raise HTTPException(status_code=400, detail="Fee type must be retired before it can be deleted")
+    has_bills = db.query(MonthlyBill).filter(MonthlyBill.fee_type_id == item_id).first() is not None
+    if has_bills:
+        b_ids_q = db.query(MonthlyBill.id).filter(MonthlyBill.fee_type_id == item_id).all()
+        b_ids = [r[0] for r in b_ids_q]
+        if b_ids:
+            has_payments = db.query(Payment).filter(Payment.bill_id.in_(b_ids)).first() is not None
+            if has_payments:
+                raise HTTPException(status_code=400, detail="Fee type has billing history and cannot be hard-deleted (NFR-1). Keep it retired.")
+    items = db.query(FeeItem).filter(FeeItem.fee_type_id == item_id).all()
+    for it in items:
+        db.delete(it)
+    bills = db.query(MonthlyBill).filter(MonthlyBill.fee_type_id == item_id).all()
+    bill_ids = [b.id for b in bills]
+    if bill_ids:
+        payments = db.query(Payment).filter(Payment.bill_id.in_(bill_ids)).all()
+        for p in payments:
+            db.delete(p)
+        for b in bills:
+            db.delete(b)
+    db.delete(row)
+    db.commit()
+    return {"id": item_id, "deleted": True}
 
 
 @router.get("/settings/classes")
@@ -816,7 +987,11 @@ def put_late_fee(body: LateFeeIn, db: Session = Depends(get_db), user: User = De
     if not row:
         row = LateFeeSetting(id=new_id())
         db.add(row)
-    row.grace_period_days = body.grace_period_days
+    if body.grace_period_days < 0:
+        raise HTTPException(status_code=400, detail="grace_period_days cannot be negative")
+    if body.late_fee_value < 0:
+        raise HTTPException(status_code=400, detail="late_fee_value cannot be negative")
+    row.grace_period_days = int(body.grace_period_days)
     row.late_fee_type = body.late_fee_type
     row.late_fee_value = Decimal(str(body.late_fee_value))
     db.commit()
@@ -866,11 +1041,14 @@ def api_year_summary(
 @router.get("/reports/tuition-status")
 def api_tuition_status(
     academicYearId: str,
+    classId: Optional[str] = None,
+    className: Optional[str] = None,
     format: str = "json",
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    data = report_tuition_status(db, academicYearId)
+    cls = className or classId
+    data = report_tuition_status(db, academicYearId, class_filter=cls)
     return _maybe_export("tuition-status", data, format)
 
 
@@ -895,10 +1073,13 @@ def reports_export(
     kind: str = Query("year-summary"),
     academicYearId: Optional[str] = None,
     studentId: Optional[str] = None,
+    classId: Optional[str] = None,
+    className: Optional[str] = None,
     format: str = Query("pdf"),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
+    cls = className or classId
     if kind == "collected" or kind == "collections-by-type":
         data = report_collections_by_type(db, academicYearId)
         kind = "collections-by-type"
@@ -908,7 +1089,7 @@ def reports_export(
         data = report_student_ledger(db, studentId)
         kind = "student-ledger"
     elif kind == "tuition-status":
-        data = report_tuition_status(db, academicYearId)
+        data = report_tuition_status(db, academicYearId, class_filter=cls)
     else:
         data = report_year_summary(db, academicYearId)
         kind = "year-summary"
@@ -1006,31 +1187,70 @@ def _maybe_export(kind: str, data: dict, fmt: str):
 
 
 @router.get("/payments/{payment_id}/receipt.pdf")
-def receipt_pdf(payment_id: str, db: Session = Depends(get_db), user: User = Depends(get_current_user)):
-    payment = db.get(Payment, payment_id)
-    if not payment:
-        raise HTTPException(status_code=404, detail="Payment not found")
-    bill = db.get(MonthlyBill, payment.bill_id)
-    student = db.get(Student, bill.student_id) if bill else None
-    year = db.get(AcademicYear, bill.academic_year_id) if bill else None
-    fee_type = db.get(FeeType, bill.fee_type_id) if bill else None
-    fee_item = db.get(FeeItem, bill.fee_item_id) if bill and bill.fee_item_id else None
-    month = db.get(HijriMonth, bill.month_id) if bill and bill.month_id else None
+@router.get("/payments/receipt/{receipt_no}/pdf")
+def receipt_pdf(
+    payment_id: Optional[str] = None,
+    receipt_no: Optional[str] = None,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    if receipt_no:
+        payments = db.query(Payment).filter(Payment.receipt_no == receipt_no).all()
+        if not payments:
+            raise HTTPException(status_code=404, detail="Receipt not found")
+        payment = payments[0]
+    else:
+        payment = db.get(Payment, payment_id)
+        if not payment:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        payments = db.query(Payment).filter(Payment.receipt_no == payment.receipt_no).all()
+        if not payments:
+            payments = [payment]
+
+    bill_ids = [p.bill_id for p in payments]
+    bills = db.query(MonthlyBill).filter(MonthlyBill.id.in_(bill_ids)).all()
+    bill_map = {b.id: b for b in bills}
+
+    first_bill = bills[0] if bills else None
+    student = db.get(Student, first_bill.student_id) if first_bill else None
+    year = db.get(AcademicYear, first_bill.academic_year_id) if first_bill else None
+    fee_types = {t.id: t for t in db.query(FeeType).all()}
+    fee_items = {i.id: i for i in db.query(FeeItem).all()}
+    months = {m.id: m for m in db.query(HijriMonth).all()}
+
     lines = [
         f"Receipt No: {payment.receipt_no}",
         f"Date: {payment.payment_date.isoformat()}",
-        f"Mode: {payment.payment_mode}",
-        f"Student: {student.name if student else '-'} ({student.student_code if student else '-'})",
+        f"Payment Mode: {payment.payment_mode.upper()}",
+        f"Student Name: {student.name if student else '-'} ({student.student_code if student else '-'})",
+        f"Father's Name: {student.father_name if student and student.father_name else '-'}",
         f"Class: {student.class_name if student else '-'}",
         f"Academic Year: {year.year_name if year else '-'}",
-        f"Fee Type: {fee_type.name if fee_type else '-'}",
-        f"Month: {month.month_name if month else '-'}",
-        f"Item: {fee_item.label if fee_item else '-'}",
-        f"Base: ₹{float(payment.base_amount):.2f}",
-        f"Late Fee: ₹{float(payment.late_fee_amount or 0):.2f}",
-        f"Total Paid: ₹{float(payment.amount):.2f}",
-        f"Remarks: {payment.remarks or ''}",
+        "----------------------------------------------------------------",
     ]
+
+    total = Decimal("0")
+    for p in payments:
+        b = bill_map.get(p.bill_id)
+        ft = fee_types.get(b.fee_type_id) if b else None
+        item_desc = ""
+        if b and b.month_id and b.month_id in months:
+            item_desc = f"{ft.name if ft else 'Tuition'} - {months[b.month_id].month_name}"
+        elif b and b.fee_item_id and b.fee_item_id in fee_items:
+            item_desc = f"{ft.name if ft else 'Fee'} - {fee_items[b.fee_item_id].label}"
+        elif ft:
+            item_desc = ft.name
+        else:
+            item_desc = "Fee Payment"
+        lines.append(f"{item_desc}: ₹{float(p.amount):.2f}")
+        total += Decimal(p.amount)
+
+    lines.extend([
+        "----------------------------------------------------------------",
+        f"Total Paid: ₹{float(total):.2f}",
+        f"Remarks: {payment.remarks or 'Paid in full'}",
+        "Status: SUCCESSFUL",
+    ])
     content = export_pdf("Fee Payment Receipt", lines)
     return Response(
         content=content,

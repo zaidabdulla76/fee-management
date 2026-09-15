@@ -42,7 +42,17 @@ export default function AcademicYears({ embedded = false }) {
       setOpen(false);
       setYearName('');
     },
-    onError: (err) => setError(errorMessage(err)),
+    onError: (err: unknown) => setError(errorMessage(err)),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: (id: string) => yearsApi.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['academic-years'] });
+      qc.invalidateQueries({ queryKey: ['academic-years-next-start'] });
+      qc.invalidateQueries({ queryKey: ['dashboard'] });
+    },
+    onError: (err: unknown) => setError(errorMessage(err)),
   });
 
   const lockedStart = Boolean(nextStart?.suggested_start_date);
@@ -82,6 +92,11 @@ export default function AcademicYears({ embedded = false }) {
           <Alert type="warning">{warning}</Alert>
         </div>
       ) : null}
+      {error ? (
+        <div className="mb-4">
+          <Alert>{error}</Alert>
+        </div>
+      ) : null}
       {isLoading ? (
         <EmptyState message="Loading…" />
       ) : !years.length ? (
@@ -95,10 +110,11 @@ export default function AcademicYears({ embedded = false }) {
                 <th className="px-4 py-3">Start date</th>
                 <th className="px-4 py-3">Period</th>
                 <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {years.map((y) => (
+              {years.map((y: { id: string; year_name: string; start_date: string; start_month: string; end_month: string; status: string }) => (
                 <tr key={y.id} className="border-t border-border">
                   <td className="px-4 py-3 font-medium text-primary">{y.year_name}</td>
                   <td className="px-4 py-3">{formatDate(y.start_date)}</td>
@@ -107,6 +123,23 @@ export default function AcademicYears({ embedded = false }) {
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={y.status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    <Button
+                      variant="secondary"
+                      className="!px-2.5 !py-1 !text-rose-600 hover:!bg-rose-50 border-rose-200 text-xs"
+                      onClick={() => {
+                        if (
+                          window.confirm(
+                            `Are you sure you want to delete school year "${y.year_name}"? All associated bills and records will be deleted.`
+                          )
+                        ) {
+                          deleteMut.mutate(y.id);
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
                   </td>
                 </tr>
               ))}

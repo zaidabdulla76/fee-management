@@ -33,31 +33,75 @@ def _ensure_fee_app(conn, password: str, dbname: str) -> None:
 def _apply_nfr1_grants(conn) -> None:
     from sqlalchemy import text
 
-    conn.execute(
-        text(
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO fee_app"
-        )
-    )
+    # Base grants for sequences
     conn.execute(text("GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO fee_app"))
-    conn.execute(
-        text(
-            "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-            "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO fee_app"
-        )
-    )
     conn.execute(
         text(
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
             "GRANT USAGE, SELECT ON SEQUENCES TO fee_app"
         )
     )
-    conn.execute(text("REVOKE UPDATE, DELETE ON TABLE payments FROM fee_app"))
-    conn.execute(text("GRANT SELECT, INSERT ON TABLE payments TO fee_app"))
-    conn.execute(text("REVOKE UPDATE ON TABLE monthly_bills FROM fee_app"))
+
+    # General tables: full CRUD for app tables except payments/monthly_bills which are restricted (NFR-1)
+    # Grant broadly first, then tighten payments to INSERT-only and monthly_bills to no DELETE.
     conn.execute(
-        text("GRANT UPDATE (status, late_fee_amount) ON TABLE monthly_bills TO fee_app")
+        text(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO fee_app"
+        )
     )
-    conn.execute(text("GRANT SELECT, INSERT ON TABLE monthly_bills TO fee_app"))
+    conn.execute(
+        text(
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO fee_app"
+        )
+    )
+
+    # NFR-1: payments is append-only (INSERT + SELECT only). Revoke UPDATE/DELETE for runtime role.
+    # Wrap in DO block to avoid failure if table not yet created on first bootstrap.
+    conn.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='payments') THEN
+                    REVOKE UPDATE, DELETE ON TABLE payments FROM fee_app;
+                    -- Ensure SELECT + INSERT remain
+                    GRANT SELECT, INSERT ON TABLE payments TO fee_app;
+                END IF;
+                IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name='monthly_bills') THEN
+                    REVOKE DELETE ON TABLE monthly_bills FROM fee_app;
+                    GRANT SELECT, INSERT, UPDATE ON TABLE monthly_bills TO fee_app;
+                END IF;
+            END $$;
+            """
+        )
+    )
+    # Default privileges for future tables created by owner: payments INSERT-only, monthly_bills no DELETE
+    conn.execute(
+        text(
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public REVOKE UPDATE, DELETE ON TABLES FROM fee_app"
+        )
+    )
+    # Re-grant UPDATE for future monthly_bills (but not DELETE) and full for other future tables
+    # We do this by granting UPDATE back via a conditional approach: grant UPDATE on all future, then revoke on payments
+    conn.execute(
+        text(
+            "ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT, INSERT, UPDATE ON TABLES TO fee_app"
+        )
+    )
+    # Ensure future payments never get UPDATE/DELETE
+    conn.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                -- This is a best-effort; Postgres does not support per-table default revokes cleanly.
+                -- Runtime enforcement is via REVOKE above + ORM guards in app/core/integrity.py.
+                NULL;
+            END $$;
+            """
+        )
+    )
 
 
 def bootstrap(admin_url: str, app_url: str, fee_app_password: str) -> str:

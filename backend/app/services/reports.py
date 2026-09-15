@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from app.models.entities import (
     AcademicYear,
+    ClassGrade,
     FeeItem,
     FeeType,
     HijriMonth,
@@ -29,7 +30,7 @@ def _year(db: Session, academic_year_id: str) -> AcademicYear:
     return year
 
 
-def report_tuition_status(db: Session, academic_year_id: str) -> dict:
+def report_tuition_status(db: Session, academic_year_id: str, class_filter: Optional[str] = None) -> dict:
     year = _year(db, academic_year_id)
     tuition = get_tuition_fee_type(db)
     bills = (
@@ -44,10 +45,18 @@ def report_tuition_status(db: Session, academic_year_id: str) -> dict:
     for b in bills:
         by_student.setdefault(b.student_id, []).append(b)
 
+    target_class = class_filter
+    if class_filter:
+        cg = db.query(ClassGrade).filter(ClassGrade.id == class_filter).first()
+        if cg:
+            target_class = cg.name
+
     rows = []
     for sid, sbills in by_student.items():
         student = db.get(Student, sid)
         if not student:
+            continue
+        if target_class and student.class_name != target_class:
             continue
         pending = [b for b in sbills if b.status != "Paid"]
         rows.append(
@@ -62,9 +71,7 @@ def report_tuition_status(db: Session, academic_year_id: str) -> dict:
                 "paid_months": len(sbills) - len(pending),
                 "pending_months": len(pending),
                 "status": "Pending" if pending else "Paid",
-                "outstanding": float(
-                    sum(Decimal(b.amount) + Decimal(b.late_fee_amount or 0) for b in pending)
-                ),
+                "outstanding": float(sum(Decimal(b.amount) + Decimal(b.late_fee_amount or 0) for b in pending)),
             }
         )
     rows.sort(key=lambda r: r["student"]["name"])
